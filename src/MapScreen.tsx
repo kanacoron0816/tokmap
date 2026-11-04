@@ -1,102 +1,91 @@
-import { useEffect, useMemo, useState } from "react";
-import { AdvancedMarker, Map, type MapMouseEvent, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
-import { AddStoreSheet } from "./AddStoreSheet";
+import { useRef, useState } from "react";
+import { AdvancedMarker, Map, type MapEvent, type MapMouseEvent, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
+import { fetchStores } from "./api";
 import { StoreSheet } from "./StoreSheet";
-import { loadStores, saveStores } from "./storage";
-import { GENRE_EMOJI, GENRES, guessGenre, type Genre, type Store, type StoreDraft, type TikTokVideo } from "./types";
+import type { Place, PlaceSummary } from "./types";
 
 const SHIBUYA = { lat: 35.6595, lng: 139.7005 };
 const MAP_ID = (import.meta.env.VITE_GOOGLE_MAP_ID as string | undefined) || "DEMO_MAP_ID";
 
-const emptyDraft = (): StoreDraft => ({ name: "", genre: "その他" });
-
 export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
   const map = useMap();
   const placesLib = useMapsLibrary("places");
-  const [stores, setStores] = useState<Store[]>(loadStores);
-  const [query, setQuery] = useState("");
-  const [genre, setGenre] = useState<Genre | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, PlaceSummary>>({});
   const [onlyWithVideos, setOnlyWithVideos] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<StoreDraft | null>(null);
-  const [pickMode, setPickMode] = useState(false);
+  const [selected, setSelected] = useState<Place | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<google.maps.places.Place[]>([]);
+  const [searching, setSearching] = useState(false);
   const [myLocation, setMyLocation] = useState<google.maps.LatLngLiteral | null>(null);
+  const idleTimer = useRef<number | undefined>(undefined);
 
-  useEffect(() => saveStores(stores), [stores]);
+  const markers = Object.values(summaries).filter((s) => !onlyWithVideos || s.count > 0);
 
-  const visibleStores = useMemo(
-    () =>
-      stores.filter(
-        (s) =>
-          (!genre || s.genre === genre) &&
-          (!onlyWithVideos || s.videos.length > 0) &&
-          (!query || s.name.toLowerCase().includes(query.toLowerCase())),
-      ),
-    [stores, genre, onlyWithVideos, query],
-  );
-
-  const selected = stores.find((s) => s.id === selectedId) ?? null;
-
-  const updateStore = (id: string, update: (s: Store) => Store) =>
-    setStores((prev) => prev.map((s) => (s.id === id ? update(s) : s)));
-
-  const openStore = (store: Store) => {
-    setSelectedId(store.id);
-    map?.panTo({ lat: store.lat, lng: store.lng });
+  /** 地図を動かし終わったら、その範囲の検索済みのお店（動画の有無）を読み込む */
+  const onIdle = (e: MapEvent) => {
+    window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(async () => {
+      const bounds = e.map.getBounds()?.toJSON();
+      if (!bounds) return;
+      const places = await fetchStores(bounds);
+      setSummaries((prev) => ({ ...prev, ...Object.fromEntries(places.map((p) => [p.placeId, p])) }));
+    }, 300);
   };
 
-  /** Google マップ上のお店（POI）をタップしたら、登録済みなら開き、未登録なら追加画面を出す */
-  const openPlace = async (placeId: string) => {
-    const existing = stores.find((s) => s.placeId === placeId);
-    if (existing) return openStore(existing);
+  const toPlace = (p: google.maps.places.Place): Place | null =>
+    p.location
+      ? { placeId: p.id, name: p.displayName ?? "", address: p.formattedAddress ?? "", lat: p.location.lat(), lng: p.location.lng() }
+      : null;
+
+  const open = (place: Place) => {
+    setSelected(place);
+    map?.panTo({ lat: place.lat, lng: place.lng });
+  };
+
+  /** Google マップ上のお店（またはピン）をタップ → 詳細を取って動画を探す */
+  const openPlaceId = async (placeId: string) => {
     if (!placesLib) return;
     const place = new placesLib.Place({ id: placeId, requestedLanguage: "ja" });
     try {
-      await place.fetchFields({ fields: ["displayName", "location", "formattedAddress", "primaryType"] });
+      await place.fetchFields({ fields: ["displayName", "location", "formattedAddress"] });
     } catch {
+      alert("お店の情報を取得できませんでした。Google Cloud で「Places API (New)」が有効か確認してください");
       return;
     }
-    if (!place.location) return;
-    setDraft({
-      name: place.displayName ?? "",
-      genre: guessGenre(place.primaryType),
-      lat: place.location.lat(),
-      lng: place.location.lng(),
-      address: place.formattedAddress ?? undefined,
-      placeId,
-    });
+    const p = toPlace(place);
+    if (p) open(p);
   };
 
   const onMapClick = (e: MapMouseEvent) => {
-    const { placeId, latLng } = e.detail;
-    if (placeId) {
-      e.stop(); // Google 標準の吹き出しを出さない
-      openPlace(placeId);
-    } else if (pickMode && latLng) {
-      setPickMode(false);
-      setDraft({ ...(draft ?? emptyDraft()), ...latLng });
-    }
+    if (!e.detail.placeId) return;
+    e.stop(); // Google 標準の吹き出しを出さない
+    openPlaceId(e.detail.placeId);
   };
 
-  const onLongPress = (e: MapMouseEvent) => {
-    const { latLng } = e.detail;
-    if (latLng) setDraft({ ...emptyDraft(), ...latLng });
-  };
-
-  const addStore = () => {
-    if (!draft || draft.lat == null || draft.lng == null) return;
-    const store: Store = { ...draft, id: `${Date.now()}`, name: draft.name.trim(), lat: draft.lat, lng: draft.lng, videos: [] };
-    setStores((prev) => [...prev, store]);
-    setDraft(null);
-    openStore(store);
-  };
-
-  // 地図の読み込みに失敗している（キーが無効など）と getCenter が例外を投げるので守る
-  const currentCenter = () => {
+  const search = async () => {
+    if (!placesLib || !query.trim()) return;
+    setSearching(true);
     try {
-      return map?.getCenter()?.toJSON();
+      let center: google.maps.LatLngLiteral | undefined;
+      try {
+        center = map?.getCenter()?.toJSON();
+      } catch {
+        // 地図の読み込みに失敗していても検索はできる
+      }
+      const { places } = await placesLib.Place.searchByText({
+        textQuery: query,
+        fields: ["id", "displayName", "location", "formattedAddress"],
+        locationBias: center,
+        maxResultCount: 8,
+        language: "ja",
+        region: "jp",
+      });
+      setResults(places);
+      if (places.length === 0) alert("見つかりませんでした");
     } catch {
-      return undefined;
+      alert("検索できませんでした。Google Cloud で「Places API (New)」が有効か確認してください");
+    } finally {
+      setSearching(false);
     }
   };
 
@@ -106,7 +95,7 @@ export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
         const pos = { lat: coords.latitude, lng: coords.longitude };
         setMyLocation(pos);
         map?.panTo(pos);
-        map?.setZoom(16);
+        map?.setZoom(17);
       },
       () => alert("位置情報を取得できませんでした。設定で位置情報の利用を許可してください"),
       { enableHighAccuracy: true, timeout: 10000 },
@@ -119,107 +108,102 @@ export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
         className="map"
         mapId={MAP_ID}
         defaultCenter={SHIBUYA}
-        defaultZoom={15}
+        defaultZoom={17}
         gestureHandling="greedy"
         disableDefaultUI
         clickableIcons
         onClick={onMapClick}
-        onContextmenu={onLongPress}
+        onIdle={onIdle}
       >
-        {visibleStores.map((s) => (
-          <AdvancedMarker key={s.id} position={{ lat: s.lat, lng: s.lng }} onClick={() => openStore(s)} zIndex={s.videos.length}>
-            <div className={`pin ${s.videos.length > 0 ? "hot" : ""} ${s.id === selectedId ? "selected" : ""}`}>
-              <span>{GENRE_EMOJI[s.genre]}</span>
-              {s.videos.length > 0 && <span className="pin-count">▶︎{s.videos.length}</span>}
-            </div>
+        {markers.map((s) => (
+          <AdvancedMarker key={s.placeId} position={{ lat: s.lat, lng: s.lng }} onClick={() => openPlaceId(s.placeId)} zIndex={s.count + 1}>
+            {s.count > 0 ? (
+              <div className={`pin hot ${s.placeId === selected?.placeId ? "selected" : ""}`}>
+                <span className="pin-count">▶︎{s.count}</span>
+              </div>
+            ) : (
+              <div className="pin-none" title="動画なし" />
+            )}
           </AdvancedMarker>
         ))}
         {myLocation && (
-          <AdvancedMarker position={myLocation} zIndex={-1}>
+          <AdvancedMarker position={myLocation} zIndex={0}>
             <div className="my-location" />
           </AdvancedMarker>
         )}
       </Map>
 
       <div className="top">
-        <div className="search-row">
-          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 登録したお店を検索" type="search" />
-          <button className="icon-button" onClick={() => confirm("Google Maps の API キーを入力し直しますか？") && onResetKey()} aria-label="設定">
+        <form
+          className="search-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            search();
+          }}
+        >
+          <input
+            className="search"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (!e.target.value) setResults([]);
+            }}
+            placeholder="🔍 店名・エリアで検索"
+            type="search"
+            enterKeyHint="search"
+          />
+          <button type="button" className="icon-button" onClick={() => confirm("Google Maps の API キーを入力し直しますか？") && onResetKey()} aria-label="設定">
             ⚙︎
           </button>
-        </div>
-        {query && (
+        </form>
+        {(results.length > 0 || searching) && (
           <ul className="suggestions">
-            {visibleStores.slice(0, 6).map((s) => (
-              <li key={s.id}>
+            {searching && <li className="suggestions-empty">検索中…</li>}
+            {results.map((r) => (
+              <li key={r.id}>
                 <button
                   onClick={() => {
-                    setQuery("");
-                    openStore(s);
+                    const p = toPlace(r);
+                    setResults([]);
+                    if (p) open(p);
                   }}
                 >
-                  {GENRE_EMOJI[s.genre]} {s.name}
-                  {s.videos.length > 0 && <span className="pin-count"> ▶︎{s.videos.length}</span>}
+                  <strong>{r.displayName}</strong>
+                  <span className="suggestion-sub">{r.formattedAddress?.replace(/^日本、\s*(〒\d{3}-\d{4}\s*)?/, "")}</span>
                 </button>
               </li>
             ))}
-            {visibleStores.length === 0 && <li className="suggestions-empty">見つかりません。右下の ＋ から追加できます</li>}
           </ul>
         )}
         <div className="chips">
           <button className={`chip ${onlyWithVideos ? "tiktok" : ""}`} onClick={() => setOnlyWithVideos((v) => !v)}>
-            🎵 動画あり
+            🎵 動画ありだけ
           </button>
-          {GENRES.map((g) => (
-            <button key={g} className={`chip ${genre === g ? "active" : ""}`} onClick={() => setGenre(genre === g ? null : g)}>
-              {GENRE_EMOJI[g]} {g}
-            </button>
-          ))}
+          <span className="legend">
+            <span className="pin hot mini">▶︎3</span> 動画あり <span className="pin-none" /> 動画なし
+          </span>
         </div>
       </div>
 
-      {pickMode ? (
-        <div className="banner">
-          追加したい場所をタップ
-          <button className="text-button light" onClick={() => setPickMode(false)}>
-            やめる
-          </button>
-        </div>
-      ) : (
-        <div className="hint">地図上のお店をタップしても追加できます</div>
-      )}
+      <div className="hint">お店をタップするとTikTok動画を探します</div>
 
       <div className="fabs">
         <button className="fab" onClick={goToCurrentLocation} aria-label="現在地">
           📍
         </button>
-        <button className="fab add" onClick={() => setDraft(emptyDraft())} aria-label="お店を追加">
-          ＋
-        </button>
       </div>
 
       {selected && (
         <StoreSheet
-          key={selected.id}
-          store={selected}
-          onClose={() => setSelectedId(null)}
-          onAddVideo={(v: TikTokVideo) => updateStore(selected.id, (s) => ({ ...s, videos: [v, ...s.videos] }))}
-          onRemoveVideo={(id) => updateStore(selected.id, (s) => ({ ...s, videos: s.videos.filter((v) => v.id !== id) }))}
-          onDeleteStore={() => {
-            setStores((prev) => prev.filter((s) => s.id !== selected.id));
-            setSelectedId(null);
-          }}
-        />
-      )}
-      {draft && !pickMode && (
-        <AddStoreSheet
-          draft={draft}
-          placesLib={placesLib}
-          getCenter={currentCenter}
-          onChange={setDraft}
-          onPickOnMap={() => setPickMode(true)}
-          onSubmit={addStore}
-          onCancel={() => setDraft(null)}
+          key={selected.placeId}
+          place={selected}
+          onClose={() => setSelected(null)}
+          onLoaded={(r) =>
+            setSummaries((prev) => ({
+              ...prev,
+              [r.placeId]: { placeId: r.placeId, name: r.name, lat: r.lat, lng: r.lng, count: r.videos.length },
+            }))
+          }
         />
       )}
     </div>

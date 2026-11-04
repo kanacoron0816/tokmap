@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { embedPlayerUrl } from "./tiktok";
-import type { TikTokVideo } from "./types";
+import type { Video } from "./types";
 
 type Props = {
-  videos: TikTokVideo[];
+  videos: Video[];
   initialIndex: number;
   storeName: string;
   onClose: () => void;
@@ -39,7 +39,7 @@ export function VideoFeed({ videos, initialIndex, storeName, onClose }: Props) {
             {i === current && (
               <iframe
                 src={embedPlayerUrl(v.id)}
-                title={v.title ?? "TikTok"}
+                title={v.caption || "TikTok"}
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 allowFullScreen
               />

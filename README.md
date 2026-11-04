@@ -4,13 +4,12 @@ Googleマップ上のお店をタップすると、そのお店に紐付いたTi
 iPhoneのSafariで開いて「ホーム画面に追加」すると、普通のアプリのように全画面で使えます（App Store・Mac・Apple Developer登録はいりません）。
 
 ## できること
-- Googleマップにお店をピン表示（動画のあるお店は赤枠＋本数バッジ）
-- **Googleマップ上のお店をタップ → そのままTokMapに登録**（店名・住所・ジャンルを自動入力）
-- ＋ボタンから店名で検索して登録（Places API）／地図をタップして場所を指定
-- お店の詳細 →「TikTokで探す」→ 動画のリンクをコピー → 貼り付けで紐付け
+- Googleマップ上のお店をタップすると、**アプリが自動でTikTok動画を検索して紐付け**ます
+  - 店名と住所から「店名」「地名（区・町・支店名）」を取り出し、動画のキャプションとハッシュタグに**両方**入っている動画だけを、そのお店の動画として表示します
+  - 店名だけ一致した動画（チェーン店の別の店舗など）は「別の店舗の可能性あり」として分けて表示します
+- 一度検索したお店は結果がサーバーに保存され、**地図に「▶︎本数」（動画あり）／灰色の点（動画なし）**で表示されます。全員で共有されます
+- 店名・エリアで検索、「動画ありだけ」の絞り込み、現在地へ移動
 - TikTok風の縦スワイプ動画プレイヤー（TikTok公式の埋め込みプレイヤーを使用）
-- 「動画あり」・ジャンルでの絞り込み、登録したお店の検索、現在地へ移動
-- データはその端末のブラウザに保存されます
 
 ## 1. Google Maps の API キーを用意する
 1. [Google Cloud Console](https://console.cloud.google.com/google/maps-apis/start) でプロジェクトを作成（請求先アカウントの登録が必要ですが、毎月の無料枠内なら料金はかかりません）
@@ -24,8 +23,12 @@ iPhoneのSafariで開いて「ホーム画面に追加」すると、普通の�
 3. Environment Variables に `VITE_GOOGLE_MAPS_API_KEY` = 発行したキー を追加して Deploy
 4. 発行された URL を iPhone の Safari で開き、共有ボタン →「ホーム画面に追加」
 
-Vercel では `api/tiktok.ts` がサーバー側で動き、TikTok の短縮URL（`vm.tiktok.com/…`）の展開とサムネイル取得を行います。
-GitHub Pages など他の静的ホスティングでも動きますが、短縮URLは一度ブラウザで開いて `…/video/数字` のURLをコピーする必要があります。
+## 3. 動画の自動検索をオンにする
+1. [Brave Search API](https://brave.com/search/api/) に登録して API キーを発行し、Vercel の Environment Variables に `BRAVE_SEARCH_API_KEY` として追加
+2. Vercel のプロジェクト →「Storage」→「Upstash for Redis」を作成してプロジェクトにつなぐ（検索結果の保存・共有用。無料枠あり）
+3. 「Deployments」から最新のものを「Redeploy」
+
+動画は Brave の検索結果に載っている TikTok 動画から探します（TikTok には外部アプリ向けの公式検索 API がないため）。
 
 > 環境変数を設定しない場合は、アプリの初回画面でキーを入力して使うこともできます。ただしiPhoneでは Safari とホーム画面のアプリで保存場所が別なので、ホーム画面から開いたときにもう一度入力が必要です。
 
@@ -39,16 +42,16 @@ npm run dev
 ## ファイル構成
 | ファイル | 役割 |
 |---|---|
-| `src/MapScreen.tsx` | 地図画面（ピン、検索、絞り込み、Googleマップのお店タップで登録） |
-| `src/StoreSheet.tsx` | お店の詳細、動画一覧、TikTok URL の紐付け |
+| `src/MapScreen.tsx` | 地図画面（動画の有無のピン、検索、絞り込み） |
+| `src/StoreSheet.tsx` | お店の詳細と、自動で見つけた動画の一覧 |
 | `src/VideoFeed.tsx` | 縦スワイプの動画プレイヤー |
-| `src/AddStoreSheet.tsx` | お店の追加（店名検索 / 地図で場所指定） |
-| `src/tiktok.ts` / `api/tiktok.ts` | TikTok URL の解析・動画情報の取得 |
-| `src/storage.ts` | 端末への保存、サンプルデータ |
+| `api/videos.ts` | お店の動画を検索して保存する |
+| `api/stores.ts` | 地図の範囲にある検索済みのお店を返す |
+| `api/_lib/match.ts` | キャプション・ハッシュタグとお店の照合ルール |
+| `api/_lib/search.ts` | Brave Search と TikTok oEmbed で動画を集める |
 
 ## 次のステップ
-1. **みんなで共有**：Supabase などにデータを保存し、全員の登録が地図に集まるようにする（＋ログイン）
-2. **紐付けの自動提案**：動画のタイトルやハッシュタグに含まれる店名を Places API で照合
-3. 「近くでバズってる店」フィード、お気に入り・行きたいリスト
+1. 表示中のエリアのお店をまとめて検索して、最初から地図に動画の有無を出す
+2. 「近くでバズってる店」フィード、お気に入り・行きたいリスト
 
 > 動画は TikTok 公式の埋め込みプレイヤーで再生しています（動画ファイルの保存・再配信はしていません）。一般公開する前に TikTok と Google Maps Platform の利用規約を確認してください。

@@ -1,52 +1,38 @@
-import { useState } from "react";
-import { fetchTikTokVideo, searchUrl } from "./tiktok";
-import { GENRE_EMOJI, type Store, type TikTokVideo } from "./types";
+import { useEffect, useState } from "react";
+import { fetchVideos } from "./api";
+import { searchUrl } from "./tiktok";
+import type { Place, PlaceResult, Video } from "./types";
 import { VideoFeed } from "./VideoFeed";
 
 type Props = {
-  store: Store;
+  place: Place;
   onClose: () => void;
-  onAddVideo: (video: TikTokVideo) => void;
-  onRemoveVideo: (videoId: string) => void;
-  onDeleteStore: () => void;
+  onLoaded: (result: PlaceResult) => void;
 };
 
-export function StoreSheet({ store, onClose, onAddVideo, onRemoveVideo, onDeleteStore }: Props) {
-  const [url, setUrl] = useState("");
-  const [loading, setLoading] = useState(false);
+export function StoreSheet({ place, onClose, onLoaded }: Props) {
+  const [result, setResult] = useState<PlaceResult | null>(null);
   const [error, setError] = useState("");
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [playing, setPlaying] = useState<{ list: Video[]; index: number } | null>(null);
+  const [showRelated, setShowRelated] = useState(false);
 
-  const addVideo = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const video = await fetchTikTokVideo(url);
-      if (store.videos.some((v) => v.id === video.id)) {
-        setError("この動画はすでに紐付けられています");
-      } else {
-        onAddVideo(video);
-        setUrl("");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    fetchVideos(place)
+      .then((r) => {
+        if (cancelled) return;
+        setResult(r);
+        onLoaded(r);
+      })
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+    // place が変わったときだけ検索する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [place.placeId]);
 
-  const pasteFromClipboard = async () => {
-    try {
-      setUrl(await navigator.clipboard.readText());
-    } catch {
-      // 許可されない場合は手入力してもらう
-    }
-  };
-
-  const mapsUrl = store.placeId
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(store.name)}&query_place_id=${store.placeId}`
-    : `https://www.google.com/maps/search/?api=1&query=${store.lat},${store.lng}`;
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name)}&query_place_id=${place.placeId}`;
 
   return (
     <>
@@ -54,94 +40,75 @@ export function StoreSheet({ store, onClose, onAddVideo, onRemoveVideo, onDelete
       <div className="sheet">
         <div className="sheet-handle" />
         <div className="sheet-head">
-          <h2>
-            {GENRE_EMOJI[store.genre]} {store.name}
-          </h2>
+          <h2>{place.name}</h2>
           <button className="text-button" onClick={onClose}>
             閉じる
           </button>
         </div>
-        <p className="sub">
-          {store.genre} ・ TikTok動画 {store.videos.length}本{store.isSample ? " ・ サンプル" : ""}
-        </p>
-        {store.address && <p className="sub">{store.address}</p>}
+        {place.address && <p className="sub">{place.address.replace(/^日本、\s*(〒\d{3}-\d{4}\s*)?/, "")}</p>}
 
         <div className="actions">
           <a className="action" href={mapsUrl} target="_blank" rel="noreferrer">
             🗺 Googleマップ
           </a>
-          <a className="action dark" href={searchUrl(store.name)} target="_blank" rel="noreferrer">
-            🎵 TikTokで探す
+          <a className="action dark" href={searchUrl(place.name)} target="_blank" rel="noreferrer">
+            🎵 TikTokアプリで見る
           </a>
         </div>
 
-        <div className="section-head">
-          <h3>動画</h3>
-          {store.videos.length > 0 && (
-            <button className="text-button" onClick={() => setEditing((e) => !e)}>
-              {editing ? "完了" : "編集"}
-            </button>
-          )}
-        </div>
-        {store.videos.length === 0 ? (
-          <p className="empty">
-            まだ動画がありません。
-            <br />
-            「TikTokで探す」で動画を見つけて、共有 →「リンクをコピー」したURLを下に貼り付けてください。
-          </p>
-        ) : (
-          <div className="grid">
-            {store.videos.map((v, i) => (
-              <div key={v.id} className="thumb-wrap">
-                <button className="thumb" onClick={() => setPlayingIndex(i)}>
-                  {v.thumbnailUrl ? (
-                    <img src={v.thumbnailUrl} alt="" onError={(e) => (e.currentTarget.style.display = "none")} />
-                  ) : null}
-                  <span className="play">▶︎</span>
-                </button>
-                <span className="thumb-author">{v.author ? `@${v.author}` : "TikTok"}</span>
-                {editing && (
-                  <button className="remove" onClick={() => onRemoveVideo(v.id)} aria-label="紐付けを解除">
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
+        <h3>TikTok動画 {result && `${result.videos.length}本`}</h3>
+        {!result && !error && (
+          <div className="loading">
+            <span className="spinner" />
+            TikTokでこのお店の動画を探しています…
           </div>
         )}
-
-        <h3>TikTok動画を紐付ける</h3>
-        <div className="input-row">
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.tiktok.com/@.../video/..."
-            inputMode="url"
-            autoCapitalize="off"
-            autoCorrect="off"
-          />
-          {!url && "clipboard" in navigator && (
-            <button className="secondary" onClick={pasteFromClipboard}>
-              貼付
-            </button>
-          )}
-          <button className="primary" disabled={!url || loading} onClick={addVideo}>
-            {loading ? "…" : "追加"}
-          </button>
-        </div>
         {error && <p className="error">{error}</p>}
+        {result && result.videos.length === 0 && (
+          <p className="empty">
+            このお店の動画は見つかりませんでした。
+            <br />
+            店名と地名の両方がキャプションやハッシュタグに入っている動画だけを表示しています。
+          </p>
+        )}
+        {result && result.videos.length > 0 && (
+          <VideoGrid videos={result.videos} onPlay={(index) => setPlaying({ list: result.videos, index })} />
+        )}
 
-        <button
-          className="danger-link"
-          onClick={() => confirm(`「${store.name}」を地図から削除しますか？`) && onDeleteStore()}
-        >
-          このお店を削除
-        </button>
+        {result && result.related.length > 0 && (
+          <>
+            <button className="related-toggle" onClick={() => setShowRelated((v) => !v)}>
+              {showRelated ? "▼" : "▶︎"} 店名だけ一致した動画 {result.related.length}本（別の店舗の可能性あり）
+            </button>
+            {showRelated && <VideoGrid videos={result.related} onPlay={(index) => setPlaying({ list: result.related, index })} />}
+          </>
+        )}
+
+        {result && (
+          <p className="note">
+            {new Date(result.searchedAt).toLocaleDateString("ja-JP")} に検索した結果です
+          </p>
+        )}
       </div>
 
-      {playingIndex !== null && (
-        <VideoFeed videos={store.videos} initialIndex={playingIndex} storeName={store.name} onClose={() => setPlayingIndex(null)} />
-      )}
+      {playing && <VideoFeed videos={playing.list} initialIndex={playing.index} storeName={place.name} onClose={() => setPlaying(null)} />}
     </>
+  );
+}
+
+function VideoGrid({ videos, onPlay }: { videos: Video[]; onPlay: (index: number) => void }) {
+  return (
+    <div className="grid">
+      {videos.map((v, i) => (
+        <div key={v.id} className="thumb-wrap">
+          <button className="thumb" onClick={() => onPlay(i)}>
+            {v.thumbnailUrl && <img src={v.thumbnailUrl} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.display = "none")} />}
+            <span className="play">▶︎</span>
+          </button>
+          <span className="thumb-author">{v.author ? `@${v.author}` : "TikTok"}</span>
+          <span className="thumb-caption">{v.caption}</span>
+        </div>
+      ))}
+    </div>
   );
 }
