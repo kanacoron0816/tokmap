@@ -1,3 +1,4 @@
+import { clientIp, requirePasscode } from "./_lib/auth.js";
 import { allowSearch, getPlace, hasDatabase, savePlace } from "./_lib/db.js";
 import { findVideos } from "./_lib/search.js";
 import type { PlaceResult } from "./_lib/types.js";
@@ -5,6 +6,9 @@ import type { PlaceResult } from "./_lib/types.js";
 // GET /api/videos?placeId=...&name=...&address=...&lat=...&lng=...
 // お店の TikTok 動画を探して返す。結果は保存してみんなで使い回す
 export async function GET(request: Request): Promise<Response> {
+  const denied = await requirePasscode(request);
+  if (denied) return denied;
+
   const p = new URL(request.url).searchParams;
   const placeId = p.get("placeId") ?? "";
   const name = (p.get("name") ?? "").slice(0, 100);
@@ -18,8 +22,7 @@ export async function GET(request: Request): Promise<Response> {
   const cached = await getPlace(placeId);
   if (cached) return Response.json({ ...cached, cached: true });
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (!(await allowSearch(ip))) {
+  if (!(await allowSearch(clientIp(request)))) {
     return Response.json({ error: "今日の検索回数の上限に達しました。明日また試してください" }, { status: 429 });
   }
 

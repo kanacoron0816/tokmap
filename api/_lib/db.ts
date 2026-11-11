@@ -50,3 +50,18 @@ export async function allowSearch(ip: string, limitPerDay = 60): Promise<boolean
   if (count === 1) await redis.expire(key, 60 * 60 * 24);
   return count <= limitPerDay;
 }
+
+/** 合言葉の総当たりを防ぐ：1 つの IP から 1 時間に間違えられる回数を制限する */
+export async function allowPasscodeAttempt(ip: string, limitPerHour = 10): Promise<boolean> {
+  if (!redis) return true;
+  const key = `passcode-fail:${ip}`;
+  const count = Number((await redis.get<number>(key)) ?? 0);
+  return count < limitPerHour;
+}
+
+export async function recordPasscodeFailure(ip: string): Promise<void> {
+  if (!redis) return;
+  const key = `passcode-fail:${ip}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, 60 * 60);
+}

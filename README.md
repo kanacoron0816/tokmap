@@ -26,7 +26,8 @@ iPhoneのSafariで開いて「ホーム画面に追加」すると、普通の�
 ## 3. 動画の自動検索をオンにする
 1. [Brave Search API](https://brave.com/search/api/) に登録して API キーを発行し、Vercel の Environment Variables に `BRAVE_SEARCH_API_KEY` として追加
 2. Vercel のプロジェクト →「Storage」→「Upstash for Redis」を作成してプロジェクトにつなぐ（検索結果の保存・共有用。無料枠あり）
-3. 「Deployments」から最新のものを「Redeploy」
+3. Environment Variables に `APP_PASSCODE`（合言葉）を追加。合言葉を知っている人しか使えなくなり、検索や地図の無料枠を他人に使われません（未設定の間は検索が止まります）
+4. 「Deployments」から最新のものを「Redeploy」
 
 動画は Brave の検索結果に載っている TikTok 動画から探します（TikTok には外部アプリ向けの公式検索 API がないため）。
 

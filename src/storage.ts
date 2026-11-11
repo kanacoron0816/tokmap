@@ -19,3 +19,22 @@ export function setStoredApiKey(key: string | null) {
     // 保存できなくても今回のセッションでは使える
   }
 }
+
+const PASSCODE_KEY = "tokmap.passcode";
+
+export function getPasscode(): string {
+  try {
+    return localStorage.getItem(PASSCODE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setPasscode(passcode: string | null) {
+  try {
+    if (passcode) localStorage.setItem(PASSCODE_KEY, passcode);
+    else localStorage.removeItem(PASSCODE_KEY);
+  } catch {
+    // 保存できない場合は毎回入力してもらう
+  }
+}
