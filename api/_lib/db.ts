@@ -43,7 +43,7 @@ export async function placesInBox(lat: number, lng: number, widthKm: number, hei
 }
 
 /** 検索 API の使いすぎを防ぐ：1 つの IP から 1 日あたりの新規検索回数を制限する */
-export async function allowSearch(ip: string, limitPerDay = 60): Promise<boolean> {
+export async function allowSearch(ip: string, limitPerDay = 200): Promise<boolean> {
   if (!redis) return true;
   const key = `ratelimit:${new Date().toISOString().slice(0, 10)}:${ip}`;
   const count = await redis.incr(key);
