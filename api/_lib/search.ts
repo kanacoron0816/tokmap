@@ -1,5 +1,12 @@
+import { takeBraveQuota } from "./db.js";
 import { matchVideo, storeKeywords } from "./match.js";
 import type { Video } from "./types.js";
+
+export class QuotaExceededError extends Error {
+  constructor() {
+    super("今月の動画検索の無料枠を使い切りました。調べ済みのお店は見られます。新しいお店は来月また調べられます");
+  }
+}
 
 const VIDEO_URL_RE = /^https:\/\/(?:www\.)?tiktok\.com\/@([^/?#]+)\/video\/(\d{8,})/;
 
@@ -51,6 +58,11 @@ export async function findVideos(name: string, address: string) {
   const candidates = new Map<string, { url: string; author: string; text: string }>();
   for (const [i, q] of queries.entries()) {
     if (i > 0 && candidates.size >= 8) break;
+    if (!(await takeBraveQuota())) {
+      // 1 回目から枠がなければエラー、2 回目なら 1 回目の結果だけで判定する
+      if (i === 0) throw new QuotaExceededError();
+      break;
+    }
     for (const r of await braveSearch(q)) {
       const m = r.url.match(VIDEO_URL_RE);
       if (!m || candidates.has(m[2])) continue;

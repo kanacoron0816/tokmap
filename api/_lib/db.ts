@@ -65,3 +65,20 @@ export async function recordPasscodeFailure(ip: string): Promise<void> {
   const count = await redis.incr(key);
   if (count === 1) await redis.expire(key, 60 * 60);
 }
+
+// Brave Search の無料クレジット（月 5 ドル ≒ 1,000 回）を超えないよう、アプリ側でも月の回数を数えて止める
+export const BRAVE_MONTHLY_LIMIT = Number(process.env.BRAVE_MONTHLY_LIMIT) || 900;
+const braveKey = () => `usage:brave:${new Date().toISOString().slice(0, 7)}`;
+
+/** Brave Search を 1 回使ってよいか。よければ回数を 1 つ増やす */
+export async function takeBraveQuota(): Promise<boolean> {
+  if (!redis) return true;
+  const count = await redis.incr(braveKey());
+  if (count === 1) await redis.expire(braveKey(), 60 * 60 * 24 * 40);
+  return count <= BRAVE_MONTHLY_LIMIT;
+}
+
+export async function braveUsage(): Promise<{ used: number; limit: number }> {
+  const used = redis ? Number((await redis.get<number>(braveKey())) ?? 0) : 0;
+  return { used: Math.min(used, BRAVE_MONTHLY_LIMIT), limit: BRAVE_MONTHLY_LIMIT };
+}

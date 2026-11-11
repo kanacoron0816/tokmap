@@ -56,3 +56,13 @@ export async function fetchStores(bounds: google.maps.LatLngBoundsLiteral): Prom
     return [];
   }
 }
+
+/** 今月の動画検索の使用回数 */
+export async function fetchUsage(): Promise<{ used: number; limit: number } | null> {
+  try {
+    const res = await apiFetch("/api/usage");
+    return res.ok ? (await res.json()).brave : null;
+  } catch {
+    return null;
+  }
+}

@@ -64,7 +64,7 @@ export default function App() {
   return (
     <ErrorBoundary onReset={() => resetKey()}>
       <APIProvider apiKey={apiKey} language="ja" region="JP">
-        <MapScreen onResetKey={() => resetKey()} />
+        <MapScreen />
       </APIProvider>
     </ErrorBoundary>
   );

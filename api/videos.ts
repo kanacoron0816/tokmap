@@ -1,6 +1,6 @@
 import { clientIp, requirePasscode } from "./_lib/auth.js";
 import { allowSearch, getPlace, hasDatabase, savePlace } from "./_lib/db.js";
-import { findVideos } from "./_lib/search.js";
+import { QuotaExceededError, findVideos } from "./_lib/search.js";
 import type { PlaceResult } from "./_lib/types.js";
 
 // GET /api/videos?placeId=...&name=...&address=...&lat=...&lng=...
@@ -32,6 +32,7 @@ export async function GET(request: Request): Promise<Response> {
     await savePlace(place);
     return Response.json({ ...place, cached: false, shared: hasDatabase });
   } catch (e) {
+    if (e instanceof QuotaExceededError) return Response.json({ error: e.message }, { status: 429 });
     console.error(e);
     return Response.json({ error: e instanceof Error ? e.message : "検索に失敗しました" }, { status: 502 });
   }

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { AdvancedMarker, Map, type MapEvent, type MapMouseEvent, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
-import { fetchStores, fetchVideos } from "./api";
+import { fetchStores, fetchUsage, fetchVideos } from "./api";
 import { StoreSheet } from "./StoreSheet";
 import type { Place, PlaceResult, PlaceSummary } from "./types";
 
@@ -15,7 +15,7 @@ type CheckState = "checking" | "error";
 
 const shortAddress = (address: string) => address.replace(/^日本、\s*(〒\d{3}-\d{4}\s*)?/, "");
 
-export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
+export function MapScreen() {
   const map = useMap();
   const placesLib = useMapsLibrary("places");
   const [summaries, setSummaries] = useState<Record<string, PlaceSummary>>({});
@@ -95,8 +95,14 @@ export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
             delete next[place.placeId];
             return next;
           });
-        } catch {
+        } catch (e) {
           setChecks((prev) => ({ ...prev, [place.placeId]: "error" }));
+          // 今月の無料枠を使い切ったら、残りのお店は調べない
+          if (e instanceof Error && e.message.includes("無料枠") && id === searchId.current) {
+            searchId.current++;
+            alert(e.message);
+            return;
+          }
         }
       }
     };
@@ -148,6 +154,17 @@ export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
     setQuery("");
     setResults(null);
     setSearching(false);
+  };
+
+  const showUsage = async () => {
+    const usage = await fetchUsage();
+    if (!usage) return alert("利用状況を取得できませんでした");
+    const left = usage.limit - usage.used;
+    alert(
+      `今月のTikTok動画検索：${usage.used} / ${usage.limit} 回（あと ${left} 回）\n\n` +
+        "無料枠を超えないよう、上限に達すると来月まで新しいお店は調べません。調べ済みのお店の動画はいつでも見られます。\n\n" +
+        "※1軒調べるのに1〜2回使います",
+    );
   };
 
   const goToCurrentLocation = () => {
@@ -236,7 +253,7 @@ export function MapScreen({ onResetKey }: { onResetKey: () => void }) {
             type="search"
             enterKeyHint="search"
           />
-          <button type="button" className="icon-button" onClick={() => confirm("Google Maps の API キーを入力し直しますか？") && onResetKey()} aria-label="設定">
+          <button type="button" className="icon-button" onClick={showUsage} aria-label="利用状況">
             ⚙︎
           </button>
         </form>
